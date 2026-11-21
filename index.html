@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Fog Mirror</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Pinyon+Script&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_detection@0.4.1646425229/face_detection.js" crossorigin="anonymous"></script>
+<style>
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0;height:100%;overflow:hidden;background:#0d1114;color:#eef1f2;font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+#view{position:fixed;inset:0;width:100%;height:100%;display:block}
+#cam{position:fixed;left:0;top:0;width:2px;height:2px;opacity:0;pointer-events:none}
+#start{position:fixed;inset:0;background:#0b0a0a}
+#start .hero{position:absolute;left:clamp(24px,4.5vw,85px);bottom:clamp(36px,9vh,110px);max-width:min(560px,calc(100% - 48px))}
+#start h1{margin:0;font:600 clamp(52px,7.6vw,96px)/1 "Segoe UI Variable Display","Segoe UI",system-ui,-apple-system,sans-serif;letter-spacing:-.01em;color:#fff}
+#start .by{display:block;margin:0 0 20px;font:400 clamp(34px,4.4vw,56px)/1.15 "Pinyon Script","Snell Roundhand","Brush Script MT",cursive;color:#f2b8cf}
+#start p{margin:0 0 6px;font-size:18px;line-height:1.5;color:rgba(255,255,255,.72)}
+#start p.priv{margin-bottom:26px;max-width:30em;font-size:14px;color:rgba(255,255,255,.5)}
+#go{font:600 18px/1 "Segoe UI",system-ui,-apple-system,sans-serif;color:#1c1014;background:#f2bcd0;border:0;border-radius:0;padding:22px 42px;cursor:pointer}
+#go:hover{background:#f8cfdf}
+#go:disabled{opacity:.55;cursor:default}
+#go:focus-visible,#shutter:focus-visible{outline:2px solid #fff;outline-offset:3px}
+#msg{margin-top:16px;min-height:3.2em;font-size:14px;line-height:1.5;color:#ffd9b8}
+.keys{position:absolute;right:clamp(24px,4.5vw,85px);bottom:clamp(36px,12vh,150px);margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:12px;align-items:flex-end;font-size:15px;color:rgba(242,184,207,.55)}
+.keys li{display:flex;align-items:center;gap:10px}
+.keys kbd{font:600 13px/1 ui-monospace,Consolas,monospace;padding:8px 11px;border-radius:3px;background:rgba(242,184,207,.26);color:rgba(255,255,255,.75)}
+@media (max-width:760px){.keys{display:none}}
+#readout{position:fixed;top:max(16px,env(safe-area-inset-top));right:max(16px,env(safe-area-inset-right));padding:8px 12px;border-radius:8px;background:rgba(0,0,0,.45);font:12px/1.5 ui-monospace,Consolas,monospace;color:#fff;white-space:pre}
+.pill{position:fixed;left:max(18px,env(safe-area-inset-left));bottom:max(18px,env(safe-area-inset-bottom));display:flex;align-items:center;gap:12px;padding:10px 18px;border-radius:999px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.38);backdrop-filter:blur(14px) saturate(1.2);-webkit-backdrop-filter:blur(14px) saturate(1.2);font-size:14px;color:#fff;text-shadow:0 1px 6px rgba(0,0,0,.35)}
+.pill input{width:130px;accent-color:#fff;margin:0}
+#shutter{position:fixed;right:max(18px,env(safe-area-inset-right));bottom:max(18px,env(safe-area-inset-bottom));width:52px;height:52px;padding:0;display:grid;place-items:center;border-radius:50%;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.38);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);color:#fff;cursor:pointer}
+#shutter:active{background:rgba(255,255,255,.3)}
+#hint{position:fixed;top:max(16px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);padding:8px 16px;border-radius:999px;font-size:13px;color:#fff;background:rgba(0,0,0,.28);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);white-space:nowrap;animation:hintfade 1s 9s forwards}
+@keyframes hintfade{to{opacity:0}}
+#flash{position:fixed;inset:0;background:#fff;opacity:0;pointer-events:none}
+#flash.on{animation:flash .35s ease-out}
+@keyframes flash{from{opacity:.75}to{opacity:0}}
+@media (prefers-reduced-motion:reduce){#hint{animation:none}#flash.on{animation:none}}
+@media (max-width:640px){#hint{white-space:normal;width:calc(100% - 32px);text-align:center}}
+</style>
+</head>
+<body>
+<canvas id="view"></canvas>
+<video id="cam" playsinline muted></video>
+
+<div id="ui" hidden>
+  <label class="pill"><span>brush</span><input id="size" type="range" min="7" max="38" value="15"></label>
+  <button id="shutter" aria-label="Save frame as PNG" title="Save frame">
+    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.5"/><path d="M12 2.5l3.2 6.2M20.8 7.6l-6.9.6M20.3 16.4l-4.7-5.1M12 21.5l-3.2-6.2M3.2 16.4l6.9-.6M3.7 7.6l4.7 5.1"/></svg>
+  </button>
+  <div id="hint">breathe on the mirror · pinch to draw · fist to wipe · hold space to fog · c clear · s save · d readouts · esc back</div>
+</div>
+<div id="readout" hidden></div>
+<div id="flash"></div>
+
+<div id="start">
+  <div class="hero">
+    <h1>Fog Mirror</h1>
+    <span class="by">by Mabhi</span>
+    <p>Uses your camera and microphone.</p>
+    <p class="priv">Everything runs in this browser. No video, audio, or data is uploaded or leaves your machine.</p>
+    <button id="go">Start</button>
+    <div id="msg" role="status"></div>
+  </div>
+  <ul class="keys">
+    <li><kbd>space</kbd> fog it up</li>
+    <li><kbd>S</kbd> save a photo</li>
+    <li><kbd>C</kbd> wipe it clean</li>
+    <li><kbd>D</kbd> readouts</li>
+    <li><kbd>esc</kbd> come back here</li>
+  </ul>
+</div>
+
+<script>
+'use strict';
+
+const HANDS_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/';
+const FACE_URL  = 'https://cdn.jsdelivr.net/npm/@mediapipe/face_detection@0.4.1646425229/';
+
+const $ = id => document.getElementById(id);
+const view = $('view'), ctx = view.getContext('2d');
+const video = $('cam'), sizeEl = $('size'), startEl = $('start'), uiEl = $('ui'), goBtn = $('go'), msgEl = $('msg');
+const fogC = document.createElement('canvas'), g = fogC.getContext('2d');
+const frostC = document.createElement('canvas'), fx = frostC.getContext('2d');
+const tinyC = document.createElement('canvas'), tx = tinyC.getContext('2d');
+const hasFilter = 'filter' in ctx;
+
+let dpr = 1, W = 0, H = 0;
+let running = false, raf = 0, frameN = 0;
+let stream = null, ac = null, analyser = null, abuf = null;
+let hands = null, face = null, handsBusy = false, faceBusy = false;
+let vw = 0, vh = 0, sc = 1, ox = 0, oy = 0, dw = 0, dh = 0;
+
+// breath / fog
+let floorLvl = -1, lastKey = -1e9, spaceHeld = false;
+const fogPos = { x: 0, y: 0 }, fogTarget = { x: 0, y: 0 };
+let brushCss = +sizeEl.value;
+
+// hand state
+let pen = false, wiping = false, relFrames = 0, lastSeen = 0;
+let raw = { x: 0, y: 0 }, p1 = { x: 0, y: 0 }, brush = { x: 0, y: 0 }, lastMid = { x: 0, y: 0 };
+let star = { x: 0, y: 0 }, wipeLast = null, saveReq = false;
+let showRead = false, lastRatio = 0, lastLevel = 0;
+
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const msg = t => { msgEl.textContent = t; };
+
+/* ---------- sizing ---------- */
+function resize() {
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const nw = Math.round(innerWidth * dpr), nh = Math.round(innerHeight * dpr);
+  if (nw === W && nh === H) return;
+  const old = W ? document.createElement('canvas') : null;
+  if (old) { old.width = fogC.width; old.height = fogC.height; old.getContext('2d').drawImage(fogC, 0, 0); }
+  W = view.width = frostC.width = fogC.width = nw;
+  H = view.height = frostC.height = fogC.height = nh;
+  tinyC.width = Math.max(8, Math.round(nw / 16)); tinyC.height = Math.max(8, Math.round(nh / 16));
+  if (old) g.drawImage(old, 0, 0, nw, nh); else clearFog();
+}
+function clearFog() {
+  g.globalCompositeOperation = 'source-over';
+  g.clearRect(0, 0, W, H);
+  g.fillStyle = 'rgba(0,0,0,0.55)';
+  g.fillRect(0, 0, W, H);
+}
+addEventListener('resize', resize);
+
+function layout() {
+  vw = video.videoWidth; vh = video.videoHeight;
+  sc = Math.max(W / vw, H / vh);
+  dw = vw * sc; dh = vh * sc; ox = (W - dw) / 2; oy = (H - dh) / 2;
+}
+const mapPt = (nx, ny) => ({ x: ox + (1 - nx) * dw, y: oy + ny * dh });
+
+function drawMirrored(c) {
+  c.save(); c.translate(ox + dw, oy); c.scale(-1, 1); c.drawImage(video, 0, 0, dw, dh); c.restore();
+}
+
+/* ---------- fog: breath ---------- */
+function puff(strength) {
+  const short = Math.min(W, H), reach = 0.43 * short;
+  const cx = fogPos.x, cy = fogPos.y + 0.06 * short;
+  g.globalCompositeOperation = 'source-over';
+  for (let i = 0; i < 12; i++) {
+    const a = Math.random() * Math.PI * 2, rr = Math.sqrt(Math.random()) * reach * 0.55;
+    const x = cx + Math.cos(a) * rr * 1.45, y = cy + Math.sin(a) * rr;
+    const br = reach * (0.35 + Math.random() * 0.2);
+    const gr = g.createRadialGradient(x, y, br * 0.4, x, y, br);
+    gr.addColorStop(0, `rgba(0,0,0,${0.36 * strength})`);
+    gr.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = gr;
+    g.beginPath(); g.arc(x, y, br, 0, Math.PI * 2); g.fill();
+  }
+}
+
+/* ---------- fog: erase (always destination-out) ---------- */
+function stamp(x, y, r) {
+  const gr = g.createRadialGradient(x, y, 0, x, y, r);
+  gr.addColorStop(0, 'rgba(0,0,0,0.34)');
+  gr.addColorStop(1, 'rgba(0,0,0,0)');
+  g.globalCompositeOperation = 'destination-out';
+  g.fillStyle = gr;
+  g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+}
+function wipeTo(pos, r) {
+  if (!wipeLast) { stamp(pos.x, pos.y, r); wipeLast = { x: pos.x, y: pos.y }; return; }
+  const dx = pos.x - wipeLast.x, dy = pos.y - wipeLast.y, d = Math.hypot(dx, dy);
+  if (d > 0.3 * W) { stamp(pos.x, pos.y, r); wipeLast = { x: pos.x, y: pos.y }; return; }
+  const step = r / 2, n = Math.min(40, Math.floor(d / step));
+  for (let k = 1; k <= n; k++) {
+    const t = (k * step) / d;
+    stamp(wipeLast.x + dx * t, wipeLast.y + dy * t, r);
+  }
+  if (n > 0) { const t = (n * step) / d; wipeLast = { x: wipeLast.x + dx * t, y: wipeLast.y + dy * t }; }
+}
+
+/* ---------- pen ---------- */
+function penDown(p) {
+  pen = true; relFrames = 0;
+  p1 = { x: p.x, y: p.y }; brush = { x: p.x, y: p.y }; lastMid = { x: p.x, y: p.y };
+  star = { x: p.x, y: p.y };
+  const r = brushCss * dpr;
+  g.globalCompositeOperation = 'destination-out';
+  g.fillStyle = '#000';
+  g.shadowColor = '#000'; g.shadowBlur = r * 0.5;
+  g.beginPath(); g.arc(p.x, p.y, r, 0, Math.PI * 2); g.fill();
+  g.shadowBlur = 0;
+}
+function penUp() { pen = false; relFrames = 0; }
+function penMove(p) {
+  p1.x += (p.x - p1.x) * 0.45; p1.y += (p.y - p1.y) * 0.45;
+  const nb = { x: brush.x + (p1.x - brush.x) * 0.22, y: brush.y + (p1.y - brush.y) * 0.22 };
+  if (Math.hypot(nb.x - brush.x, nb.y - brush.y) < 0.0006 * W) return;
+  const mid = { x: (brush.x + nb.x) / 2, y: (brush.y + nb.y) / 2 };
+  const r = brushCss * dpr;
+  g.globalCompositeOperation = 'destination-out';
+  g.strokeStyle = '#000'; g.lineWidth = r * 2; g.lineCap = 'round'; g.lineJoin = 'round';
+  g.shadowColor = '#000'; g.shadowBlur = r * 0.5;
+  g.beginPath(); g.moveTo(lastMid.x, lastMid.y); g.quadraticCurveTo(brush.x, brush.y, mid.x, mid.y); g.stroke();
+  g.shadowBlur = 0;
+  brush = nb; lastMid = mid;
+}
+
+/* ---------- MediaPipe results ---------- */
+function onHands(res) {
+  if (!running) return;
+  const now = performance.now();
+  const lm = res.multiHandLandmarks && res.multiHandLandmarks[0];
+  if (!lm) {
+    wiping = false; wipeLast = null;
+    if (pen && now - lastSeen > 250) penUp();
+    return;
+  }
+  lastSeen = now;
+  const P = i => ({ x: lm[i].x * vw, y: lm[i].y * vh });
+  const D = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+  const wrist = P(0);
+  const ratio = D(P(4), P(8)) / D(wrist, P(9));
+  const fist = [[8, 6], [12, 10], [16, 14], [20, 18]].every(([t, p]) => D(P(t), wrist) < D(P(p), wrist));
+  const indexOut = D(P(8), wrist) > D(P(6), wrist);
+  lastRatio = ratio;
+  const tip = mapPt(lm[8].x, lm[8].y);
+  raw = tip;
+
+  if (!pen && fist) {
+    wiping = true;
+    const hw = Math.max(D(P(5), P(17)), D(wrist, P(9))) * sc;
+    const cx = (lm[5].x + lm[9].x + lm[13].x + lm[17].x) / 4, cy = (lm[5].y + lm[9].y + lm[13].y + lm[17].y) / 4;
+    wipeTo(mapPt(cx, cy), Math.max(hw * 1.6, 8 * dpr));
+  } else { wiping = false; wipeLast = null; }
+
+  if (!pen) {
+    if (!fist && ratio < 0.22 && indexOut) penDown(tip);
+  } else {
+    if (ratio > 0.38) { if (++relFrames >= 2) penUp(); } else relFrames = 0;
+    if (pen) penMove(tip);
+  }
+}
+function onFace(res) {
+  const d = res.detections && res.detections[0];
+  if (!d) return;
+  const m = d.landmarks[3];
+  const p = mapPt(m.x, m.y);
+  fogTarget.x = p.x; fogTarget.y = p.y;
+}
+
+/* ---------- star ---------- */
+function drawStar(x, y) {
+  const R = 12 * dpr, r = 3.6 * dpr;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.shadowColor = 'rgba(255,236,170,1)'; ctx.shadowBlur = 20 * dpr;
+  ctx.fillStyle = '#fffbe8';
+  ctx.beginPath();
+  for (let i = 0; i < 8; i++) {
+    const rad = i % 2 ? r : R, a = -Math.PI / 2 + i * Math.PI / 4;
+    ctx.lineTo(Math.cos(a) * rad, Math.sin(a) * rad);
+  }
+  ctx.closePath(); ctx.fill(); ctx.fill();
+  ctx.restore();
+}
+
+/* ---------- main loop ---------- */
+function frame(now) {
+  if (!running) return;
+  raf = requestAnimationFrame(frame);
+  frameN++;
+  if (video.readyState < 2 || !video.videoWidth) return;
+  layout();
+
+  if (!handsBusy) { handsBusy = true; hands.send({ image: video }).then(() => { handsBusy = false; }); }
+  if (!faceBusy && frameN % 5 === 0) { faceBusy = true; face.send({ image: video }).then(() => { faceBusy = false; }); }
+
+  // breath level with floating noise floor
+  let strength = 0;
+  if (analyser) {
+    analyser.getFloatTimeDomainData(abuf);
+    let s = 0; for (let i = 0; i < abuf.length; i++) s += abuf[i] * abuf[i];
+    const level = Math.sqrt(s / abuf.length);
+    lastLevel = level;
+    if (floorLvl < 0) floorLvl = level;
+    strength = clamp((level - floorLvl - 0.0025) / 0.0005, 0, 1);
+    floorLvl += (level - floorLvl) * (level < floorLvl ? 0.05 : 0.0008);
+    if (now - lastKey < 300) strength = 0;
+  }
+  if (spaceHeld) strength = 1;
+
+  fogPos.x += (fogTarget.x - fogPos.x) * 0.4;
+  fogPos.y += (fogTarget.y - fogPos.y) * 0.4;
+  if (strength > 0 && !pen && !wiping && frameN % 2 === 0) puff(strength);
+
+  // layer 1: mirrored camera
+  ctx.clearRect(0, 0, W, H);
+  drawMirrored(ctx);
+
+  // layer 3: frost = blurred, brightened, tinted camera masked by the fog canvas
+  fx.globalCompositeOperation = 'source-over';
+  fx.clearRect(0, 0, W, H);
+  if (hasFilter) {
+    fx.filter = `blur(${18 * dpr}px) brightness(1.18)`;
+    drawMirrored(fx);
+    fx.filter = 'none';
+  } else {
+    tx.clearRect(0, 0, tinyC.width, tinyC.height);
+    tx.save(); tx.scale(tinyC.width / W, tinyC.height / H); drawMirrored(tx); tx.restore();
+    fx.imageSmoothingEnabled = true; fx.imageSmoothingQuality = 'high';
+    fx.drawImage(tinyC, 0, 0, W, H);
+  }
+  fx.fillStyle = 'rgba(242,238,231,0.62)';
+  fx.fillRect(0, 0, W, H);
+  fx.globalCompositeOperation = 'destination-in';
+  fx.drawImage(fogC, 0, 0);
+  fx.globalCompositeOperation = 'source-over';
+  ctx.drawImage(frostC, 0, 0);
+
+  if (pen) {
+    star.x += (raw.x - star.x) * 0.55; star.y += (raw.y - star.y) * 0.55;
+    drawStar(star.x, star.y);
+  }
+
+  if (showRead && frameN % 6 === 0) {
+    $('readout').textContent = `level ${lastLevel.toFixed(4)}\nfloor ${Math.max(floorLvl, 0).toFixed(4)}\nbreath ${(strength * 100).toFixed(0)}%\npinch ${lastRatio.toFixed(2)} ${pen ? '(pen down)' : wiping ? '(wipe)' : ''}`;
+  }
+
+  if (saveReq) {
+    saveReq = false;
+    view.toBlob(b => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(b); a.download = 'fog.png'; a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    }, 'image/png');
+    const f = $('flash'); f.classList.remove('on'); void f.offsetWidth; f.classList.add('on');
+  }
+}
+
+/* ---------- start / stop ---------- */
+async function start() {
+  msg('');
+  if (location.protocol === 'file:') {
+    msg('Camera access is blocked on file:// pages. Serve this folder with "python3 -m http.server" and open http://localhost:8000/fog.html.');
+    return;
+  }
+  if (!window.Hands || !window.FaceDetection) { msg('MediaPipe could not be loaded. Check your internet connection and reload.'); return; }
+  goBtn.disabled = true; msg('Asking for camera and microphone…');
+  const aud = { echoCancellation: false, noiseSuppression: false, autoGainControl: false };
+  const vid = { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' };
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: vid, audio: aud });
+  } catch (e) {
+    if (e.name === 'NotFoundError') {
+      try { stream = await navigator.mediaDevices.getUserMedia({ video: vid }); }
+      catch (e2) { msg('No camera found.'); goBtn.disabled = false; return; }
+    } else {
+      msg(e.name === 'NotAllowedError'
+        ? 'Camera access was refused. Allow the camera and microphone for this page in the address bar, then try again.'
+        : 'Could not open the camera: ' + e.name + (e.message ? ' (' + e.message + ')' : ''));
+      goBtn.disabled = false; return;
+    }
+  }
+  video.srcObject = stream;
+  await video.play();
+  if (!video.videoWidth) await new Promise(r => video.addEventListener('loadedmetadata', r, { once: true }));
+
+  analyser = null;
+  const at = stream.getAudioTracks();
+  if (at.length) {
+    ac = new (window.AudioContext || window.webkitAudioContext)();
+    const src = ac.createMediaStreamSource(new MediaStream(at));
+    analyser = ac.createAnalyser(); analyser.fftSize = 1024;
+    abuf = new Float32Array(analyser.fftSize);
+    src.connect(analyser);   // not connected to destination: no feedback
+    await ac.resume();
+  }
+
+  if (!hands) {
+    msg('Loading hand and face models…');
+    hands = new Hands({ locateFile: f => HANDS_URL + f });
+    hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.6, minTrackingConfidence: 0.5, selfieMode: false });
+    hands.onResults(onHands);
+    face = new FaceDetection({ locateFile: f => FACE_URL + f });
+    face.setOptions({ model: 'short', minDetectionConfidence: 0.5 });
+    face.onResults(onFace);
+    await hands.initialize();
+    await face.initialize();
+  }
+
+  resize(); clearFog();
+  fogPos.x = fogTarget.x = W / 2; fogPos.y = fogTarget.y = H * 0.6;
+  floorLvl = -1; pen = false; wiping = false; wipeLast = null; handsBusy = false; faceBusy = false;
+  startEl.hidden = true; uiEl.hidden = false; goBtn.blur();
+  const h = $('hint'); h.style.animation = 'none'; void h.offsetWidth; h.style.animation = '';
+  if (!analyser) { msg(''); }
+  running = true; raf = requestAnimationFrame(frame);
+}
+function stop() {
+  running = false; cancelAnimationFrame(raf);
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  if (ac) { ac.close(); ac = null; }
+  stream = null; analyser = null; video.srcObject = null;
+  uiEl.hidden = true; $('readout').hidden = true; showRead = false; startEl.hidden = false; goBtn.disabled = false; msg('');
+}
+
+/* ---------- input ---------- */
+goBtn.addEventListener('click', start);
+sizeEl.addEventListener('input', () => { brushCss = +sizeEl.value; });
+$('shutter').addEventListener('click', () => { saveReq = true; $('shutter').blur(); });
+addEventListener('keydown', e => {
+  if (!running) return;
+  lastKey = performance.now();
+  if (e.code === 'Space') { spaceHeld = true; e.preventDefault(); }
+  else if (e.key === 'c' || e.key === 'C') clearFog();
+  else if (e.key === 's' || e.key === 'S') saveReq = true;
+  else if (e.key === 'd' || e.key === 'D') { showRead = !showRead; $('readout').hidden = !showRead; }
+  else if (e.key === 'Escape') stop();
+});
+addEventListener('keyup', e => { if (e.code === 'Space') spaceHeld = false; });
+addEventListener('blur', () => { spaceHeld = false; });
+
+resize();
+</script>
+</body>
+</html>
